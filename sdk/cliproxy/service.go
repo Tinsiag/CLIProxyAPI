@@ -26,6 +26,18 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// UsageSyncPlugin is the interface for usage database synchronization plugins.
+type UsageSyncPlugin interface {
+	// Start begins the background synchronization goroutines.
+	Start() error
+	// RestoreToMemory loads historical data from database into memory.
+	RestoreToMemory(stats interface{}) error
+	// HandleUsage handles a usage record.
+	HandleUsage(ctx context.Context, record interface{})
+	// Shutdown stops the plugin and flushes remaining data.
+	Shutdown(ctx context.Context) error
+}
+
 // Service wraps the proxy server lifecycle so external programs can embed the CLI proxy.
 // It manages the complete lifecycle including authentication, file watching, HTTP server,
 // and integration with various AI service providers.
@@ -89,6 +101,9 @@ type Service struct {
 
 	// wsGateway manages websocket Gemini providers.
 	wsGateway *wsrelay.Manager
+
+	// usageSyncPlugin handles usage statistics database synchronization.
+	usageSyncPlugin UsageSyncPlugin
 }
 
 // RegisterUsagePlugin registers a usage plugin on the global usage manager.
@@ -98,6 +113,12 @@ type Service struct {
 //   - plugin: The usage plugin to register
 func (s *Service) RegisterUsagePlugin(plugin usage.Plugin) {
 	usage.RegisterPlugin(plugin)
+}
+
+// SetUsageSyncPlugin sets the usage database synchronization plugin.
+// This plugin handles persisting usage statistics to a database.
+func (s *Service) SetUsageSyncPlugin(plugin UsageSyncPlugin) {
+	s.usageSyncPlugin = plugin
 }
 
 // newDefaultAuthManager creates a default authentication manager with all supported providers.
@@ -464,6 +485,17 @@ func (s *Service) Run(ctx context.Context) error {
 
 	usage.StartDefault(ctx)
 
+	// Initialize usage sync plugin if configured
+	if s.usageSyncPlugin != nil {
+		if err := s.usageSyncPlugin.Start(); err != nil {
+			log.Warnf("failed to start usage sync plugin: %v", err)
+		} else {
+			// Register as usage plugin for receiving records
+			usage.RegisterPlugin(&usagePluginAdapter{plugin: s.usageSyncPlugin})
+			log.Info("usage sync plugin started and registered")
+		}
+	}
+
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
 	defer func() {
@@ -701,6 +733,16 @@ func (s *Service) Shutdown(ctx context.Context) error {
 			defer cancel()
 			if err := s.server.Stop(shutdownCtx); err != nil {
 				log.Errorf("error stopping API server: %v", err)
+				if shutdownErr == nil {
+					shutdownErr = err
+				}
+			}
+		}
+
+		// Shutdown usage sync plugin
+		if s.usageSyncPlugin != nil {
+			if err := s.usageSyncPlugin.Shutdown(ctx); err != nil {
+				log.Errorf("failed to shutdown usage sync plugin: %v", err)
 				if shutdownErr == nil {
 					shutdownErr = err
 				}
@@ -1396,4 +1438,16 @@ func applyOAuthModelAlias(cfg *config.Config, provider, authKind string, models 
 		}
 	}
 	return out
+}
+
+// usagePluginAdapter adapts UsageSyncPlugin to usage.Plugin interface.
+type usagePluginAdapter struct {
+	plugin UsageSyncPlugin
+}
+
+// HandleUsage implements usage.Plugin.
+func (a *usagePluginAdapter) HandleUsage(ctx context.Context, record usage.Record) {
+	if a.plugin != nil {
+		a.plugin.HandleUsage(ctx, record)
+	}
 }

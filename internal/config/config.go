@@ -64,6 +64,9 @@ type Config struct {
 	// UsageStatisticsEnabled toggles in-memory usage aggregation; when false, usage data is discarded.
 	UsageStatisticsEnabled bool `yaml:"usage-statistics-enabled" json:"usage-statistics-enabled"`
 
+	// UsageStorage configures persistence of usage statistics to a database.
+	UsageStorage *UsageStorageConfig `yaml:"usage-storage,omitempty" json:"usage-storage,omitempty"`
+
 	// DisableCooling disables quota cooldown scheduling when true.
 	DisableCooling bool `yaml:"disable-cooling" json:"disable-cooling"`
 

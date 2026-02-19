@@ -62,15 +62,36 @@ error-logs-max-files: 10
 # When false, disable in-memory usage statistics aggregation
 usage-statistics-enabled: false
 
+# Usage statistics persistence to MySQL database
+# When enabled, usage data is asynchronously synchronized to MySQL and restored on restart.
+# usage-storage:
+#   enabled: true
+#   mysql:
+#     host: "localhost"
+#     port: 3306
+#     database: "cliproxy_usage"
+#     username: "root"
+#     password: ""
+#     max-open-conns: 10
+#     max-idle-conns: 5
+#     conn-max-lifetime: "30m"
+#   sync:
+#     interval: "10s"        # How often to flush buffer to database
+#     batch-size: 200        # Maximum records per batch write
+#     buffer-size: 1000      # In-memory buffer size for async writes
+#   retention:
+#     detail-days: 7         # Keep detailed records for N days
+#     summary-days: 365      # Keep aggregated summaries for N days
+#     hourly-days: 30        # Keep hourly stats for N days
+#   recovery:
+#     load-detail-days: 7    # Load N days of detailed records on startup
+#     load-summary-days: 365 # Load N days of summary data on startup
+
 # Proxy URL. Supports socks5/http/https protocols. Example: socks5://user:pass@192.168.1.1:1080/
 proxy-url: ""
 
 # When true, unprefixed model requests only use credentials without a prefix (except when prefix == model name).
 force-model-prefix: false
-
-# When true, forward filtered upstream response headers to downstream clients.
-# Default is false (disabled).
-passthrough-headers: false
 
 # Number of times to retry a request. Retries will occur if the HTTP response code is 403, 408, 500, 502, 503, or 504.
 request-retry: 3

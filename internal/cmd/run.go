@@ -12,7 +12,9 @@ import (
 
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/api"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/usage"
 	"github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy"
+	coreusage "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/usage"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -24,7 +26,8 @@ import (
 //   - cfg: The application configuration
 //   - configPath: The path to the configuration file
 //   - localPassword: Optional password accepted for local management requests
-func StartService(cfg *config.Config, configPath string, localPassword string) {
+//   - usageSyncPlugin: Optional usage database sync plugin
+func StartService(cfg *config.Config, configPath string, localPassword string, usageSyncPlugin *usage.DatabaseSyncPlugin) {
 	builder := cliproxy.NewBuilder().
 		WithConfig(cfg).
 		WithConfigPath(configPath).
@@ -49,10 +52,49 @@ func StartService(cfg *config.Config, configPath string, localPassword string) {
 		return
 	}
 
+	// Set usage sync plugin if provided
+	if usageSyncPlugin != nil {
+		service.SetUsageSyncPlugin(&usagePluginAdapter{plugin: usageSyncPlugin})
+	}
+
 	err = service.Run(runCtx)
 	if err != nil && !errors.Is(err, context.Canceled) {
 		log.Errorf("proxy service exited with error: %v", err)
 	}
+}
+
+// usagePluginAdapter adapts usage.DatabaseSyncPlugin to cliproxy.UsageSyncPlugin interface.
+type usagePluginAdapter struct {
+	plugin *usage.DatabaseSyncPlugin
+}
+
+// Start implements cliproxy.UsageSyncPlugin.
+func (a *usagePluginAdapter) Start() error {
+	return (*a.plugin).Start()
+}
+
+// RestoreToMemory implements cliproxy.UsageSyncPlugin.
+func (a *usagePluginAdapter) RestoreToMemory(stats interface{}) error {
+	if s, ok := stats.(*usage.RequestStatistics); ok {
+		return (*a.plugin).RestoreToMemory(s)
+	}
+	return nil
+}
+
+// HandleUsage implements cliproxy.UsageSyncPlugin.
+func (a *usagePluginAdapter) HandleUsage(ctx context.Context, record interface{}) {
+	if a.plugin == nil {
+		return
+	}
+	// Convert record from usage.Record to coreusage.Record
+	if r, ok := record.(coreusage.Record); ok {
+		(*a.plugin).HandleUsage(ctx, r)
+	}
+}
+
+// Shutdown implements cliproxy.UsageSyncPlugin.
+func (a *usagePluginAdapter) Shutdown(ctx context.Context) error {
+	return (*a.plugin).Shutdown(ctx)
 }
 
 // StartServiceBackground starts the proxy service in a background goroutine

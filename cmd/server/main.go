@@ -559,9 +559,44 @@ func main() {
 				}
 			}
 		} else {
-			// Start the main proxy service
+		// Start the main proxy service
 			managementasset.StartAutoUpdater(context.Background(), configFilePath)
-			cmd.StartService(cfg, configFilePath, password)
+			cmd.StartService(cfg, configFilePath, password, initializeUsageSyncPlugin(cfg))
 		}
 	}
+}
+
+// initializeUsageSyncPlugin creates and initializes the usage database sync plugin if configured.
+func initializeUsageSyncPlugin(cfg *config.Config) *usage.DatabaseSyncPlugin {
+	if cfg == nil {
+		log.Debug("initializeUsageSyncPlugin: cfg is nil")
+		return nil
+	}
+	if cfg.UsageStorage == nil {
+		log.Debug("initializeUsageSyncPlugin: cfg.UsageStorage is nil")
+		return nil
+	}
+	if !cfg.UsageStorage.Enabled {
+		log.Debug("initializeUsageSyncPlugin: cfg.UsageStorage.Enabled is false")
+		return nil
+	}
+
+	log.Infof("Initializing usage MySQL store: %s:%d/%s", cfg.UsageStorage.MySQL.Host, cfg.UsageStorage.MySQL.Port, cfg.UsageStorage.MySQL.Database)
+	mysqlStore, err := store.NewUsageMySQLStore(&cfg.UsageStorage.MySQL)
+	if err != nil {
+		log.Errorf("failed to create usage MySQL store: %v", err)
+		return nil
+	}
+	log.Info("Usage MySQL store created successfully")
+
+	syncPlugin := usage.NewDatabaseSyncPlugin(mysqlStore, cfg.UsageStorage)
+
+	// Restore historical data to memory
+	if err := syncPlugin.RestoreToMemory(usage.GetRequestStatistics()); err != nil {
+		log.Warnf("failed to restore usage data from MySQL: %v", err)
+	} else {
+		log.Info("Usage data restored from MySQL successfully")
+	}
+
+	return syncPlugin
 }
